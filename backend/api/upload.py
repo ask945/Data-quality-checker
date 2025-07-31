@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, File, UploadFile, HTTPException, Query
 from fastapi.responses import JSONResponse
 import pandas as pd
 import io
@@ -46,10 +46,13 @@ def infer_sql_type(dtype):
         return "TEXT"
 
 @router.post("/upload")
-def upload_file(file: UploadFile = File(...)):
-    # Set random seeds for reproducibility on every request
+def upload_file(
+    file: UploadFile = File(...),
+    analyzeType: str = Query("sql", enum=["sql", "ml"])
+):
     random.seed(42)
     np.random.seed(42)
+
     filename = file.filename
     ext = os.path.splitext(filename)[-1].lower()
     try:
@@ -65,27 +68,25 @@ def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"File parsing error: {e}")
 
     df = sanitize_columns(df)
-    # Replace all string 'NULL' (case-insensitive) with np.nan for compatibility
+
     def null_to_nan(val):
         if isinstance(val, str) and re.fullmatch(r'null', val, re.IGNORECASE):
             return np.nan
         return val
+
     df = df.applymap(null_to_nan)
     table_name = os.path.splitext(os.path.basename(filename))[0].replace("-", "_").replace(" ", "_").lower()
 
-    # Store DataFrame in global in-memory cache
     in_memory_tables[table_name] = df
-
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
 
-    # Run anomaly checker (in memory, no file saving)
-    results = run_comprehensive_anomaly_detection(df)
+    # Run anomaly checker based on analyzeType
+    results = run_comprehensive_anomaly_detection(df, mode=analyzeType)
     report = results['report']
     recommendations = results['recommendations']
     log_output = results.get('log', '')
 
-    # Build JSON-serializable response
     formatted_output = (
         f"{log_output}\n\n"
         f"Total anomalies found (events): {report.get('anomaly_event_count', 'N/A')}\n"
@@ -93,7 +94,8 @@ def upload_file(file: UploadFile = File(...)):
         f"Anomaly breakdown by method: {report.get('method_breakdown', {})}\n"
         f"RECOMMENDATIONS:\n  " + "\n  ".join(recommendations)
     )
-    response = {
+
+    return JSONResponse({
         "table_name": table_name,
         "schema": schema,
         "sample": sample,
@@ -105,36 +107,36 @@ def upload_file(file: UploadFile = File(...)):
         "recommendations": recommendations,
         "log": log_output,
         "formatted_output": formatted_output
-    }
-    return JSONResponse(response)
+    })
 
 @router.get("/analyze/{table_name}")
-def analyze_table(table_name: str):
-    # Set random seeds for reproducibility on every request
+def analyze_table(
+    table_name: str,
+    analyzeType: str = Query("sql", enum=["sql", "ml"])
+):
     random.seed(42)
     np.random.seed(42)
-    # Look up DataFrame in global in-memory cache
+
     df = in_memory_tables.get(table_name)
     if df is None:
         return JSONResponse(status_code=404, content={"detail": f"Table '{table_name}' not found in memory. Please upload it first."})
 
     df = sanitize_columns(df)
-    # Replace all string 'NULL' (case-insensitive) with np.nan for compatibility
+
     def null_to_nan(val):
         if isinstance(val, str) and re.fullmatch(r'null', val, re.IGNORECASE):
             return np.nan
         return val
+
     df = df.applymap(null_to_nan)
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
 
-    # Run anomaly checker (in memory, no file saving)
-    results = run_comprehensive_anomaly_detection(df)
+    results = run_comprehensive_anomaly_detection(df, mode=analyzeType)
     report = results['report']
     recommendations = results['recommendations']
     log_output = results.get('log', '')
 
-    # Build JSON-serializable response
     formatted_output = (
         f"{log_output}\n\n"
         f"Total anomalies found (events): {report.get('anomaly_event_count', 'N/A')}\n"
@@ -142,7 +144,8 @@ def analyze_table(table_name: str):
         f"Anomaly breakdown by method: {report.get('method_breakdown', {})}\n"
         f"RECOMMENDATIONS:\n  " + "\n  ".join(recommendations)
     )
-    response = {
+
+    return JSONResponse({
         "table_name": table_name,
         "schema": schema,
         "sample": sample,
@@ -154,5 +157,4 @@ def analyze_table(table_name: str):
         "recommendations": recommendations,
         "log": log_output,
         "formatted_output": formatted_output
-    }
-    return JSONResponse(response) 
+    })

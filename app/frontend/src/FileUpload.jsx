@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { use } from "react";
 
 const FileUpload = () => {
   const [file, setFile] = useState(null);
@@ -8,6 +9,9 @@ const FileUpload = () => {
   const [error, setError] = useState("");
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeType,setAnalyzeType]=useState("sql");
+
+  
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
@@ -47,9 +51,14 @@ const FileUpload = () => {
     formData.append("file", file);
 
     try {
-      const res = await axios.post("http://localhost:8000/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      // ✅ Add the analysis_type as a query parameter
+      const res = await axios.post(
+        `http://localhost:8000/upload?analysis_type=${analyzeType}`, 
+        formData, 
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        }
+      );
       setResult(res.data);
     } catch (err) {
       setError(err.response?.data?.detail || "Upload failed");
@@ -57,11 +66,14 @@ const FileUpload = () => {
     setUploading(false);
   };
 
-  const handleAnalyze = async () => {
+ const handleAnalyze = async () => {
     setAnalyzing(true);
     setAnalysis(null);
     try {
-      const res = await axios.get(`http://localhost:8000/analyze/${result.table_name}`);
+      // ✅ Add the analysis_type as a query parameter
+      const res = await axios.get(
+        `http://localhost:8000/analyze/${result.table_name}?analysis_type=${analyzeType}`
+      );
       setAnalysis(res.data);
     } catch (err) {
       setAnalysis({ error: err.response?.data?.detail || "Analysis failed" });
@@ -137,6 +149,27 @@ const FileUpload = () => {
       <div className="header">
         <h1>Data Quality Checker</h1>
         <p>Upload a CSV, Excel, or JSON file to run anomaly checks with a single click.</p>
+
+          <div>
+            <label>
+              <input
+                type="radio"
+                name="analysisType"
+                value="sql"
+                checked={analyzeType === "sql"}
+                onChange={() => setAnalyzeType("sql")}
+              /> SQL
+            </label>
+            <label style={{ marginLeft: "16px" }}>
+              <input
+                type="radio"
+                name="analysisType"
+                value="ml"
+                checked={analyzeType === "ml"}
+                onChange={() => setAnalyzeType("ml")}
+              /> ML
+            </label>
+          </div>
       </div>
 
       <div className="card">

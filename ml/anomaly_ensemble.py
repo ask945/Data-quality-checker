@@ -9,73 +9,75 @@ from ml.deletion_anomaly import detect_deletion_anomalies
 from ml.update_anomaly import detect_update_anomalies
 from ml.anomaly_scorer import calculate_anomaly_scores, filter_high_confidence_anomalies, get_anomaly_summary, rank_anomalies_by_severity
 
-def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05) -> Dict:
-    """Run all anomaly detection methods and return combined results"""
-    
+def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mode: str = "sql") -> Dict:
     results = {}
-    
-    # 1. Numeric anomalies (existing)
-    try:
-        numeric_results = detect_numeric_anomalies(df)
-        results['numeric'] = numeric_results
-        print(f"✓ Numeric anomalies detected: {len(numeric_results)}")
-    except Exception as e:
-        print(f"✗ Numeric anomaly detection failed: {e}")
-        results['numeric'] = pd.DataFrame()
-    
-    # 2. Categorical anomalies (existing)
-    try:
-        categorical_results = detect_categorical_anomalies(df)
-        results['categorical'] = categorical_results
-        print(f"✓ Categorical anomalies detected: {len(categorical_results)}")
-    except Exception as e:
-        print(f"✗ Categorical anomaly detection failed: {e}")
-        results['categorical'] = pd.DataFrame()
-    
-    # 3. LightGBM anomalies (new)
-    try:
-        model, label_encoders = train_lightgbm_anomaly_detector(df, contamination)
-        lightgbm_results, predictions = detect_lightgbm_anomalies(df, model, label_encoders)
-        feature_importance = get_feature_importance(model, df)
-        
-        results['lightgbm'] = lightgbm_results
-        results['lightgbm_predictions'] = predictions
-        results['feature_importance'] = feature_importance
-        print(f"✓ LightGBM anomalies detected: {len(lightgbm_results)}")
-    except Exception as e:
-        print(f"✗ LightGBM anomaly detection failed: {e}")
-        results['lightgbm'] = pd.DataFrame()
-        results['lightgbm_predictions'] = None
-        results['feature_importance'] = pd.DataFrame()
-    
-    # 4. Insertion anomalies (new)
-    try:
-        insertion_results = detect_insertion_anomalies(df)
-        results['insertion'] = insertion_results
-        print(f"✓ Insertion anomalies detected: {len(insertion_results)}")
-    except Exception as e:
-        print(f"✗ Insertion anomaly detection failed: {e}")
-        results['insertion'] = pd.DataFrame()
 
-    # 5. Deletion anomalies (new)
-    try:
-        deletion_results = detect_deletion_anomalies(df)
-        results['deletion'] = deletion_results
-        print(f"✓ Deletion anomalies detected: {len(deletion_results)}")
-    except Exception as e:
-        print(f"✗ Deletion anomaly detection failed: {e}")
-        results['deletion'] = pd.DataFrame()
+    if mode in ("sql", "ml"):
+        # 1. Numeric anomalies
+        try:
+            numeric_results = detect_numeric_anomalies(df)
+            results['numeric'] = numeric_results
+            print(f"✓ Numeric anomalies detected: {len(numeric_results)}")
+        except Exception as e:
+            print(f"✗ Numeric anomaly detection failed: {e}")
+            results['numeric'] = pd.DataFrame()
 
-    # 6. Update anomalies (new)
-    try:
-        update_results = detect_update_anomalies(df)
-        results['update'] = update_results
-        print(f"✓ Update anomalies detected: {len(update_results)}")
-    except Exception as e:
-        print(f"✗ Update anomaly detection failed: {e}")
-        results['update'] = pd.DataFrame()
+        # 2. Categorical anomalies
+        try:
+            categorical_results = detect_categorical_anomalies(df)
+            results['categorical'] = categorical_results
+            print(f"✓ Categorical anomalies detected: {len(categorical_results)}")
+        except Exception as e:
+            print(f"✗ Categorical anomaly detection failed: {e}")
+            results['categorical'] = pd.DataFrame()
+
+        # 3. LightGBM anomalies
+        try:
+            model, label_encoders = train_lightgbm_anomaly_detector(df, contamination)
+            lightgbm_results, predictions = detect_lightgbm_anomalies(df, model, label_encoders)
+            feature_importance = get_feature_importance(model, df)
+            results['lightgbm'] = lightgbm_results
+            results['lightgbm_predictions'] = predictions
+            results['feature_importance'] = feature_importance
+            print(f"✓ LightGBM anomalies detected: {len(lightgbm_results)}")
+        except Exception as e:
+            print(f"✗ LightGBM anomaly detection failed: {e}")
+            results['lightgbm'] = pd.DataFrame()
+            results['lightgbm_predictions'] = None
+            results['feature_importance'] = pd.DataFrame()
+
+    # SQL-specific anomaly checks
+    if mode == "sql":
+        # 4. Insertion anomalies
+        try:
+            insertion_results = detect_insertion_anomalies(df)
+            results['insertion'] = insertion_results
+            print(f"✓ Insertion anomalies detected: {len(insertion_results)}")
+        except Exception as e:
+            print(f"✗ Insertion anomaly detection failed: {e}")
+            results['insertion'] = pd.DataFrame()
+
+        # 5. Deletion anomalies
+        try:
+            deletion_results = detect_deletion_anomalies(df)
+            results['deletion'] = deletion_results
+            print(f"✓ Deletion anomalies detected: {len(deletion_results)}")
+        except Exception as e:
+            print(f"✗ Deletion anomaly detection failed: {e}")
+            results['deletion'] = pd.DataFrame()
+
+        # 6. Update anomalies
+        try:
+            update_results = detect_update_anomalies(df)
+            results['update'] = update_results
+            print(f"✓ Update anomalies detected: {len(update_results)}")
+        except Exception as e:
+            print(f"✗ Update anomaly detection failed: {e}")
+            results['update'] = pd.DataFrame()
 
     return results
+
+
 
 def combine_anomaly_results(all_results: Dict) -> pd.DataFrame:
     """Combine results from all detection methods"""

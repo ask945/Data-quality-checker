@@ -12,6 +12,7 @@ from ml.anomaly_scorer import calculate_anomaly_scores, filter_high_confidence_a
 def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mode: str = "sql") -> Dict:
     results = {}
 
+    # Common anomaly checks for both SQL and ML modes
     if mode in ("sql", "ml"):
         # 1. Numeric anomalies
         try:
@@ -46,8 +47,9 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             results['lightgbm_predictions'] = None
             results['feature_importance'] = pd.DataFrame()
 
-    # SQL-specific anomaly checks
+    # SQL-specific anomaly checks (ONLY when mode is "sql")
     if mode == "sql":
+        
         # 4. Insertion anomalies
         try:
             insertion_results = detect_insertion_anomalies(df)
@@ -74,6 +76,7 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
         except Exception as e:
             print(f"✗ Update anomaly detection failed: {e}")
             results['update'] = pd.DataFrame()
+    
 
     return results
 
@@ -170,4 +173,4 @@ def get_anomaly_recommendations(report: Dict) -> List[str]:
         top_feature = report['feature_importance'][0]['feature']
         recommendations.append(f"🎯 Focus on column '{top_feature}' - it contributes most to anomalies.")
     
-    return recommendations 
+    return recommendations

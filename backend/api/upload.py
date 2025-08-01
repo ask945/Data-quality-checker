@@ -48,7 +48,7 @@ def infer_sql_type(dtype):
 @router.post("/upload")
 def upload_file(
     file: UploadFile = File(...),
-    analyzeType: str = Query("sql", enum=["sql", "ml"])
+    analysis_type: str = Query("sql", enum=["sql", "ml"])  # Changed from analyzeType to analysis_type
 ):
     random.seed(42)
     np.random.seed(42)
@@ -81,8 +81,9 @@ def upload_file(
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
 
-    # Run anomaly checker based on analyzeType
-    results = run_comprehensive_anomaly_detection(df, mode=analyzeType)
+    # Run anomaly checker based on analysis_type
+    print(f"🔍 Running anomaly detection in mode: {analysis_type}")  # Debug log
+    results = run_comprehensive_anomaly_detection(df, mode=analysis_type)
     report = results['report']
     recommendations = results['recommendations']
     log_output = results.get('log', '')
@@ -106,13 +107,14 @@ def upload_file(
         "feature_importance": report.get('feature_importance', []),
         "recommendations": recommendations,
         "log": log_output,
-        "formatted_output": formatted_output
+        "formatted_output": formatted_output,
+        "mode_used": analysis_type  # Add this to verify the mode in frontend
     })
 
 @router.get("/analyze/{table_name}")
 def analyze_table(
     table_name: str,
-    analyzeType: str = Query("sql", enum=["sql", "ml"])
+    analysis_type: str = Query("sql", enum=["sql", "ml"])  # Changed from analyzeType to analysis_type
 ):
     random.seed(42)
     np.random.seed(42)
@@ -132,7 +134,9 @@ def analyze_table(
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
 
-    results = run_comprehensive_anomaly_detection(df, mode=analyzeType)
+    # Run anomaly checker based on analysis_type
+    print(f"🔍 Running anomaly detection in mode: {analysis_type}")  # Debug log
+    results = run_comprehensive_anomaly_detection(df, mode=analysis_type)
     report = results['report']
     recommendations = results['recommendations']
     log_output = results.get('log', '')
@@ -156,5 +160,6 @@ def analyze_table(
         "feature_importance": report.get('feature_importance', []),
         "recommendations": recommendations,
         "log": log_output,
-        "formatted_output": formatted_output
+        "formatted_output": formatted_output,
+        "mode_used": analysis_type  # Add this to verify the mode in frontend
     })

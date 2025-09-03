@@ -1,7 +1,8 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from fastapi import APIRouter, File, UploadFile, HTTPException, Query
+from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Form
+from fastapi import Body
 from fastapi.responses import JSONResponse
 from typing import List
 import pandas as pd
@@ -20,6 +21,9 @@ router = APIRouter()
 
 # Global in-memory cache for uploaded tables
 in_memory_tables = {}
+
+# Store last upload mapping from filename to table_name to help with relationship analysis
+last_filename_to_table = {}
 
 def sanitize_columns(df):
     df.columns = [re.sub(r'[^a-zA-Z0-9_]', '_', col) for col in df.columns]
@@ -73,6 +77,12 @@ def process_single_file(file: UploadFile, analysis_type: str):
     
     # Store in memory
     in_memory_tables[table_name] = df
+    # Track filename to table mapping
+    try:
+        global last_filename_to_table
+        last_filename_to_table[filename] = table_name
+    except Exception:
+        pass
     
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
@@ -150,7 +160,8 @@ def upload_file(
 @router.post("/upload-multiple")
 def upload_multiple_files(
     files: List[UploadFile] = File(...),
-    analysis_type: str = Query("sql", enum=["sql", "ml"])
+    analysis_type: str = Query("sql", enum=["sql", "ml"]),
+    relationships: str | None = Form(None)
 ):
     """Multiple files upload endpoint"""
     random.seed(42)
@@ -162,10 +173,12 @@ def upload_multiple_files(
     results = []
     errors = []
     
+    filename_to_table = {}
     for file in files:
         try:
             result = process_single_file(file, analysis_type)
             results.append(result)
+            filename_to_table[file.filename] = result.get("table_name")
         except Exception as e:
             error_result = {
                 "filename": file.filename,
@@ -182,8 +195,236 @@ def upload_multiple_files(
         "results": results,
         "errors": errors if errors else None
     }
-    
+    # Attach relationships metadata back to response if provided
+    if relationships:
+        try:
+            import json
+            response_data["relationships"] = json.loads(relationships)
+        except Exception:
+            response_data["relationships"] = {"raw": relationships}
+
+    # Include filename->table mapping for client convenience
+    if filename_to_table:
+        response_data["filename_to_table"] = filename_to_table
+
     return JSONResponse(sanitize_for_json(response_data))
+
+
+def _normalize_name(name: str) -> str:
+    import re
+    s = name.lower()
+    s = re.sub(r"[^a-z0-9]", "", s)  # remove non-alnum
+    return s
+
+
+def _variants(name: str) -> List[str]:
+    base = _normalize_name(name)
+    variants = {base}
+    # remove common suffixes/prefixes
+    for suffix in ("id", "key", "no", "num", "code"):
+        if base.endswith(suffix) and len(base) > len(suffix) + 1:
+            variants.add(base[: -len(suffix)])
+    # add with id/key suffix
+    variants.add(base + "id")
+    variants.add(base + "key")
+    return list(variants)
+
+
+def _infer_join_keys(df_primary: pd.DataFrame, df_other: pd.DataFrame) -> List[str]:
+    """Infer potential join keys based on common columns and fuzzy naming heuristics."""
+    # Exact common columns
+    common = [c for c in df_primary.columns if c in df_other.columns]
+    preferred = [c for c in common if c.lower() in ("id", "key") or c.endswith("_id") or c.endswith("Id")]
+    if preferred or common:
+        return preferred or common[:1]
+
+    # Fuzzy match: find pairs whose normalized variants intersect
+    best_match = None
+    for c1 in df_primary.columns:
+        v1 = set(_variants(c1))
+        for c2 in df_other.columns:
+            v2 = set(_variants(c2))
+            if v1 & v2:
+                # Prefer id-like names
+                score = 0
+                if c1.lower().endswith(("id", "Id")) or c2.lower().endswith(("id", "Id")):
+                    score += 2
+                if len(v1 & v2) > 0:
+                    score += 1
+                if best_match is None or score > best_match[0]:
+                    best_match = (score, c1)
+    return [best_match[1]] if best_match else []
+
+
+def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str], relation_type: str) -> List[dict]:
+    """Validate simple cardinality rules based on relation_type using inferred keys."""
+    issues = []
+    if not keys:
+        return issues
+    key = keys[0]
+    if key not in df_primary.columns or key not in df_other.columns:
+        return issues
+
+    primary_dupes = df_primary.duplicated(subset=[key], keep=False)
+    other_dupes = df_other.duplicated(subset=[key], keep=False)
+
+    if relation_type == "1:1":
+        # No duplicates allowed in either side for key
+        if primary_dupes.any():
+            for idx in df_primary[primary_dupes].index[:50]:
+                issues.append({
+                    "issue_type": "cardinality_violation",
+                    "details": f"1:1 requires unique '{key}' in primary; duplicate at row {int(idx)}",
+                })
+        if other_dupes.any():
+            for idx in df_other[other_dupes].index[:50]:
+                issues.append({
+                    "issue_type": "cardinality_violation",
+                    "details": f"1:1 requires unique '{key}' in related; duplicate at row {int(idx)}",
+                })
+    elif relation_type == "1:M":
+        # Primary must be unique; other may repeat
+        if primary_dupes.any():
+            for idx in df_primary[primary_dupes].index[:50]:
+                issues.append({
+                    "issue_type": "cardinality_violation",
+                    "details": f"1:M requires unique '{key}' in primary; duplicate at row {int(idx)}",
+                })
+    elif relation_type == "M:1":
+        # Other must be unique; primary may repeat
+        if other_dupes.any():
+            for idx in df_other[other_dupes].index[:50]:
+                issues.append({
+                    "issue_type": "cardinality_violation",
+                    "details": f"M:1 requires unique '{key}' in related; duplicate at row {int(idx)}",
+                })
+    # M:N: no uniqueness constraints here
+    return issues
+
+
+def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str]) -> List[dict]:
+    """Detect orphan records on either side based on join keys (deletion/insertion anomalies)."""
+    issues = []
+    if not keys:
+        return issues
+    key = keys[0]
+    if key not in df_primary.columns or key not in df_other.columns:
+        return issues
+    primary_keys = set(df_primary[key].dropna().astype(str))
+    other_keys = set(df_other[key].dropna().astype(str))
+
+    # Child (other) orphans: keys not present in primary
+    missing_in_primary = other_keys - primary_keys
+    if missing_in_primary:
+        issues.append({
+            "issue_type": "referential_violation",
+            "details": f"{len(missing_in_primary)} keys in related not present in primary for key '{key}'",
+        })
+
+    # Parent (primary) unreferenced: keys present in primary not referenced by other
+    missing_in_other = primary_keys - other_keys
+    if missing_in_other:
+        issues.append({
+            "issue_type": "unreferenced_keys",
+            "details": f"{len(missing_in_other)} keys in primary not referenced by related for key '{key}'",
+        })
+    return issues
+
+
+def _check_conflicting_values(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str]) -> List[dict]:
+    """Detect inconsistent values across overlapping non-key columns for same key (update anomalies)."""
+    issues = []
+    if not keys:
+        return issues
+    key = keys[0]
+    if key not in df_primary.columns or key not in df_other.columns:
+        return issues
+
+    overlap_cols = [c for c in df_primary.columns if c in df_other.columns and c != key]
+    if not overlap_cols:
+        return issues
+    # Join on key
+    merged = df_primary[[key] + overlap_cols].merge(
+        df_other[[key] + overlap_cols], on=key, how="inner", suffixes=("_primary", "_related")
+    )
+    for col in overlap_cols:
+        left = f"{col}_primary"
+        right = f"{col}_related"
+        diffs = merged[(merged[left].notna()) & (merged[right].notna()) & (merged[left] != merged[right])]
+        if not diffs.empty:
+            issues.append({
+                "issue_type": "inconsistent_update",
+                "details": f"Column '{col}' has {len(diffs)} conflicting values between primary and related",
+            })
+    return issues
+
+
+@router.post("/analyze-relationships")
+def analyze_relationships(
+    payload: dict = Body(..., description="Relationships and file contexts for cross-table analysis")
+):
+    """Analyze cross-table anomalies based on provided relationships and uploaded tables in memory."""
+    try:
+        relationships = payload.get("relationships") or {}
+        file_contexts = payload.get("files") or []
+        # Build filename->table mapping
+        filename_to_table = {ctx.get("filename"): ctx.get("table_name") for ctx in file_contexts if ctx.get("filename") and ctx.get("table_name")}
+        if not filename_to_table:
+            # Fall back to last known mapping if available
+            filename_to_table = last_filename_to_table.copy()
+
+        primary_idx = relationships.get("primaryIndex")
+        primary_filename = relationships.get("primaryFilename")
+        relations = relationships.get("relations", {})
+        if primary_filename is None and isinstance(primary_idx, int) and 0 <= primary_idx < len(file_contexts):
+            primary_filename = file_contexts[primary_idx].get("filename")
+
+        if not primary_filename:
+            raise HTTPException(status_code=400, detail="Primary filename not provided for relationship analysis")
+
+        primary_table = filename_to_table.get(primary_filename)
+        if not primary_table or primary_table not in in_memory_tables:
+            raise HTTPException(status_code=404, detail=f"Primary table for '{primary_filename}' not found in memory")
+
+        df_primary = in_memory_tables[primary_table]
+
+        relation_results = []
+        for related_filename, relation_type in relations.items():
+            related_table = filename_to_table.get(related_filename)
+            if not related_table or related_table not in in_memory_tables:
+                relation_results.append({
+                    "related": related_filename,
+                    "relation_type": relation_type,
+                    "errors": [f"Table for '{related_filename}' not found"],
+                    "anomalies": []
+                })
+                continue
+
+            df_other = in_memory_tables[related_table]
+            keys = _infer_join_keys(df_primary, df_other)
+            anomalies = []
+            anomalies.extend(_check_cardinality(df_primary, df_other, keys, relation_type))
+            anomalies.extend(_check_referential(df_primary, df_other, keys))
+            anomalies.extend(_check_conflicting_values(df_primary, df_other, keys))
+
+            relation_results.append({
+                "related": related_filename,
+                "relation_type": relation_type,
+                "join_keys": keys,
+                "anomalies": anomalies,
+            })
+
+        # Summarize
+        total_anomalies = sum(len(r.get("anomalies", [])) for r in relation_results)
+        return JSONResponse(sanitize_for_json({
+            "primary": primary_filename,
+            "results": relation_results,
+            "total_anomalies": total_anomalies
+        }))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/analyze/{table_name}")
 def analyze_table(

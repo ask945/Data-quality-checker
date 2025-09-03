@@ -9,6 +9,12 @@ const FileUpload = () => {
   const [analysis, setAnalysis] = useState({});
   const [analyzing, setAnalyzing] = useState({});
   const [analyzeType, setAnalyzeType] = useState("sql");
+  const [primaryIndex, setPrimaryIndex] = useState(0);
+  const [relationships, setRelationships] = useState({}); // key: file index (non-primary) -> relation type
+  const [serverRelationships, setServerRelationships] = useState(null);
+  const [crossAnalyzing, setCrossAnalyzing] = useState(false);
+  const [crossResults, setCrossResults] = useState(null);
+  const [analyzingAll, setAnalyzingAll] = useState(false);
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
@@ -24,6 +30,9 @@ const FileUpload = () => {
     
     setResults([]);
     setAnalysis({});
+    setPrimaryIndex(0);
+    setRelationships({});
+    setServerRelationships(null);
   };
 
   const handleDragOver = (e) => {
@@ -53,6 +62,9 @@ const FileUpload = () => {
       
       setResults([]);
       setAnalysis({});
+      setPrimaryIndex(0);
+      setRelationships({});
+      setServerRelationships(null);
     }
   };
 
@@ -84,6 +96,17 @@ const FileUpload = () => {
         files.forEach((file) => {
           formData.append("files", file);
         });
+        // Attach relationships metadata (by filename) if present
+        try {
+          const relationsPayload = {
+            primaryIndex,
+            primaryFilename: files[primaryIndex]?.name,
+            relations: Object.fromEntries(
+              Object.entries(relationships).map(([idx, rel]) => [files[Number(idx)]?.name, rel])
+            ),
+          };
+          formData.append("relationships", JSON.stringify(relationsPayload));
+        } catch (_) {}
         
         const res = await axios.post(
           `http://localhost:8000/upload-multiple?analysis_type=${analyzeType}`, 
@@ -96,6 +119,13 @@ const FileUpload = () => {
         // Handle the response from the new endpoint
         if (res.data.results) {
           setResults(res.data.results);
+          if (res.data.relationships) {
+            setServerRelationships(res.data.relationships);
+          } else {
+            setServerRelationships(null);
+          }
+          // Reset cross-table results on new upload
+          setCrossResults(null);
           
           // Show summary of upload results
           if (res.data.failed_uploads > 0) {
@@ -112,24 +142,84 @@ const FileUpload = () => {
 
   const handleAnalyze = async (tableName, index) => {
     setAnalyzing(prev => ({ ...prev, [index]: true }));
-    
     try {
-      const res = await axios.get(
-        `http://localhost:8000/analyze/${tableName}?analysis_type=${analyzeType}`
-      );
+      const res = await axios.get(`http://localhost:8000/analyze/${tableName}?analysis_type=${analyzeType}`);
       setAnalysis(prev => ({ ...prev, [index]: res.data }));
     } catch (err) {
-      setAnalysis(prev => ({ 
-        ...prev, 
-        [index]: { error: err.response?.data?.detail || "Analysis failed" }
-      }));
+      setAnalysis(prev => ({ ...prev, [index]: { error: err.response?.data?.detail || "Analysis failed" } }));
     }
-    
     setAnalyzing(prev => ({ ...prev, [index]: false }));
+  };
+
+  const handleCrossAnalyze = async () => {
+    if (!serverRelationships || results.length <= 1) return;
+    setCrossAnalyzing(true);
+    setError("");
+    try {
+      const payload = {
+        relationships: serverRelationships,
+        files: results.map(r => ({ filename: r.filename, table_name: r.table_name }))
+      };
+      const res = await axios.post(`http://localhost:8000/analyze-relationships`, payload);
+      setCrossResults(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Cross-table analysis failed");
+    }
+    setCrossAnalyzing(false);
+  };
+
+  const handleAnalyzeAll = async () => {
+    if (!results || results.length === 0) return;
+    setAnalyzingAll(true);
+    setError("");
+    setCrossResults(null);
+    setAnalysis({});
+    try {
+      // Run per-table analyses sequentially to keep UI state simple
+      for (let i = 0; i < results.length; i++) {
+        const tableName = results[i].table_name;
+        try {
+          const res = await axios.get(`http://localhost:8000/analyze/${tableName}?analysis_type=${analyzeType}`);
+          setAnalysis(prev => ({ ...prev, [i]: res.data }));
+        } catch (err) {
+          setAnalysis(prev => ({ ...prev, [i]: { error: err.response?.data?.detail || "Analysis failed" } }));
+        }
+      }
+      // Run cross-table analysis if relationships exist and more than one table
+      if (serverRelationships && results.length > 1) {
+        const payload = {
+          relationships: serverRelationships,
+          files: results.map(r => ({ filename: r.filename, table_name: r.table_name }))
+        };
+        try {
+          const res = await axios.post(`http://localhost:8000/analyze-relationships`, payload);
+          setCrossResults(res.data);
+        } catch (err) {
+          // Keep per-table results even if cross-table fails
+          setError(err.response?.data?.detail || "Cross-table analysis failed");
+        }
+      }
+    } finally {
+      setAnalyzingAll(false);
+    }
   };
 
   const removeFile = (indexToRemove) => {
     setFiles(files.filter((_, index) => index !== indexToRemove));
+    // Adjust relationships and primary if necessary
+    setRelationships((prev) => {
+      const updated = {};
+      Object.entries(prev).forEach(([idx, rel]) => {
+        const numIdx = Number(idx);
+        if (numIdx === indexToRemove) return;
+        updated[numIdx > indexToRemove ? String(numIdx - 1) : String(numIdx)] = rel;
+      });
+      return updated;
+    });
+    setPrimaryIndex((prev) => {
+      if (prev === indexToRemove) return 0;
+      return prev > indexToRemove ? prev - 1 : prev;
+    });
   };
 
   const clearAllFiles = () => {
@@ -141,6 +231,9 @@ const FileUpload = () => {
     if (fileInput) {
       fileInput.value = "";
     }
+    setPrimaryIndex(0);
+    setRelationships({});
+    setServerRelationships(null);
   };
 
   function renderTable(data) {
@@ -270,6 +363,35 @@ const FileUpload = () => {
                     </button>
                   </div>
                 ))}
+                {analyzeType === "sql" && files.length > 1 && (
+                  <div className="relationships">
+                    <h4>Define Relationships</h4>
+                    <div className="relationship-row">
+                      <label>Primary dataset:&nbsp;</label>
+                      <select value={primaryIndex} onChange={(e) => setPrimaryIndex(Number(e.target.value))}>
+                        {files.map((f, idx) => (
+                          <option key={idx} value={idx}>{f.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {files.map((f, idx) => (
+                      idx !== primaryIndex && (
+                        <div key={idx} className="relationship-row">
+                          <span>{files[primaryIndex]?.name} ↔ {f.name}</span>
+                          <select
+                            value={relationships[idx] || "1:1"}
+                            onChange={(e) => setRelationships((prev) => ({ ...prev, [idx]: e.target.value }))}
+                          >
+                            <option value="1:1">1:1</option>
+                            <option value="1:M">1:M</option>
+                            <option value="M:1">M:1</option>
+                            <option value="M:N">M:N</option>
+                          </select>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -304,6 +426,95 @@ const FileUpload = () => {
               </button>
             </div>
 
+            {/* 1) Previews of tables */}
+            <div className="card nested-card">
+              <h4>Previews</h4>
+              {results.map((result, index) => (
+                <div key={`preview-${index}`} className="result-section">
+                  <div className="file-result-header">
+                    <h5 style={{ marginBottom: 6 }}>{result.filename || result.table_name}</h5>
+                    <span className="table-name">Table: {result.table_name}</span>
+                  </div>
+                  {result.status === 'error' ? (
+                    <div className="alert alertError">{result.error}</div>
+                  ) : (
+                    <>
+                      {renderTable(result.sample)}
+                      <div className="rowCount"><b>Total Rows:</b> {result.row_count}</div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* 2) Defined Relationships */}
+            {Array.isArray(results) && results.length > 1 && serverRelationships && (
+              <div className="card nested-card">
+                <h4>Defined Relationships</h4>
+                {(() => {
+                  const rels = serverRelationships;
+                  const primaryName = rels.primaryFilename || (results[rels.primaryIndex]?.filename || results[rels.primaryIndex]?.table_name);
+                  const entries = rels.relations ? Object.entries(rels.relations) : [];
+                  if (entries.length === 0) return <p>No relationships specified.</p>;
+                  return (
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {entries.map(([fname, relType]) => (
+                        <li key={fname}><b>{primaryName}</b> ↔ <b>{fname}</b>: {relType}</li>
+                      ))}
+                    </ul>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* 3) Run Anomaly Check button */}
+            <div className="actions" style={{ marginBottom: 16 }}>
+              <button className="buttonSecondary" disabled={analyzingAll} onClick={handleAnalyzeAll}>
+                {analyzingAll ? (<><span className="spinner" /> Running anomaly checks...</>) : ("Run Anomaly Check")}
+              </button>
+            </div>
+
+            {/* 4) Outputs */}
+            {crossResults && (
+              <div className="card nested-card analysis-card">
+                <h4>Cross-Table Anomalies</h4>
+                <p><b>Primary:</b> {crossResults.primary}</p>
+                <p><b>Total Issues:</b> {crossResults.total_anomalies}</p>
+                <div className="tableContainer">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Related</th>
+                        <th>Relation</th>
+                        <th>Join Keys</th>
+                        <th>Anomalies</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {crossResults.results.map((r, i) => (
+                        <tr key={i}>
+                          <td>{r.related}</td>
+                          <td>{r.relation_type}</td>
+                          <td>{Array.isArray(r.join_keys) ? r.join_keys.join(', ') : ''}</td>
+                          <td>
+                            {Array.isArray(r.anomalies) && r.anomalies.length > 0 ? (
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {r.anomalies.map((a, j) => (
+                                  <li key={j}>{a.issue_type}: {a.details}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span>None</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {results.map((result, index) => (
               <div key={index} className="file-result card nested-card">
                 {result.status === "error" ? (
@@ -320,30 +531,8 @@ const FileUpload = () => {
                       <h4>{result.filename || result.table_name}</h4>
                       <span className="table-name">Table: {result.table_name}</span>
                     </div>
-
-                    <div className="result-section">
-                      <h5>Sample Data</h5>
-                      {renderTable(result.sample)}
-                      <div className="rowCount">
-                        <b>Total Rows:</b> {result.row_count}
-                      </div>
-                    </div>
-
-                    <div className="actions">
-                      <button
-                        className="buttonSecondary"
-                        onClick={() => handleAnalyze(result.table_name, index)}
-                        disabled={analyzing[index]}
-                      >
-                        {analyzing[index] ? (
-                          <>
-                            <span className="spinner" /> Analyzing...
-                          </>
-                        ) : (
-                          "Run Anomaly Check"
-                        )}
-                      </button>
-                    </div>
+                    {/* Preview moved to Previews section above */}
+                    {/* Per-file run button removed in favor of unified Run Anomaly Check */}
 
                     {analyzing[index] && (
                       <div className="spinner-container">
@@ -368,15 +557,15 @@ const FileUpload = () => {
                                     if (recIndex !== -1) {
                                       return (
                                         <>
-                                          <p>{summary.slice(0, recIndex).trim()}</p>
-                                          <div className="recommendations">
+                                          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{summary.slice(0, recIndex).trim()}</pre>
+                                          <div className="recommendations" style={{ marginTop: 12 }}>
                                             <strong>Recommendations:</strong>
-                                            <p>{summary.slice(recIndex + 'RECOMMENDATIONS:'.length).trim()}</p>
+                                            <p style={{ marginTop: 6 }}>{summary.slice(recIndex + 'RECOMMENDATIONS:'.length).trim()}</p>
                                           </div>
                                         </>
                                       );
                                     }
-                                    return <p>{summary}</p>;
+                                    return <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{summary}</pre>;
                                   })()}
                                 </div>
                               </div>

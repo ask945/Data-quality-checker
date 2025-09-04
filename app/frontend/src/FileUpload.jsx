@@ -12,7 +12,7 @@ const FileUpload = () => {
   const [primaryIndex, setPrimaryIndex] = useState(0);
   const [relationships, setRelationships] = useState({}); // key: file index (non-primary) -> relation type
   const [serverRelationships, setServerRelationships] = useState(null);
-  const [crossAnalyzing, setCrossAnalyzing] = useState(false);
+
   const [crossResults, setCrossResults] = useState(null);
   const [analyzingAll, setAnalyzingAll] = useState(false);
 
@@ -151,22 +151,7 @@ const FileUpload = () => {
     setAnalyzing(prev => ({ ...prev, [index]: false }));
   };
 
-  const handleCrossAnalyze = async () => {
-    if (!serverRelationships || results.length <= 1) return;
-    setCrossAnalyzing(true);
-    setError("");
-    try {
-      const payload = {
-        relationships: serverRelationships,
-        files: results.map(r => ({ filename: r.filename, table_name: r.table_name }))
-      };
-      const res = await axios.post(`http://localhost:8000/analyze-relationships`, payload);
-      setCrossResults(res.data);
-    } catch (err) {
-      setError(err.response?.data?.detail || "Cross-table analysis failed");
-    }
-    setCrossAnalyzing(false);
-  };
+
 
   const handleAnalyzeAll = async () => {
     if (!results || results.length === 0) return;
@@ -294,25 +279,34 @@ const FileUpload = () => {
         <h1>Data Quality Checker</h1>
         <p>Upload multiple CSV, Excel, or JSON files to run anomaly checks with a single click.</p>
 
-        <div>
-          <label>
-            <input
-              type="radio"
-              name="analysisType"
-              value="sql"
-              checked={analyzeType === "sql"}
-              onChange={() => setAnalyzeType("sql")}
-            /> SQL
-          </label>
-          <label style={{ marginLeft: "16px" }}>
-            <input
-              type="radio"
-              name="analysisType"
-              value="ml"
-              checked={analyzeType === "ml"}
-              onChange={() => setAnalyzeType("ml")}
-            /> ML
-          </label>
+        <div className="mode-selector">
+          <h4>Analysis Mode</h4>
+          <div className="radio-group">
+            <label className={`radio-option ${analyzeType === "sql" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="analysisType"
+                value="sql"
+                checked={analyzeType === "sql"}
+                onChange={() => setAnalyzeType("sql")}
+              />
+              <span className="radio-custom"></span>
+              <span className="radio-label">SQL Mode</span>
+              <span className="radio-description">Comprehensive anomaly detection with relationship analysis</span>
+            </label>
+            <label className={`radio-option ${analyzeType === "ml" ? "active" : ""}`}>
+              <input
+                type="radio"
+                name="analysisType"
+                value="ml"
+                checked={analyzeType === "ml"}
+                onChange={() => setAnalyzeType("ml")}
+              />
+              <span className="radio-custom"></span>
+              <span className="radio-label">ML Mode</span>
+              <span className="radio-description">Machine learning-based pattern detection (single file)</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -338,7 +332,7 @@ const FileUpload = () => {
                 {files.length > 0 
                   ? `Selected ${files.length} file${files.length > 1 ? 's' : ''}` 
                   : analyzeType === "ml" 
-                    ? 'Choose a file or drag it here (ML mode: single file only).'
+                    ? 'Choose a file or drag it here.'
                     : 'Choose files or drag them here.'
                 }
               </p>
@@ -366,30 +360,43 @@ const FileUpload = () => {
                 {analyzeType === "sql" && files.length > 1 && (
                   <div className="relationships">
                     <h4>Define Relationships</h4>
-                    <div className="relationship-row">
-                      <label>Primary dataset:&nbsp;</label>
-                      <select value={primaryIndex} onChange={(e) => setPrimaryIndex(Number(e.target.value))}>
+                    <div className="relationship-config">
+                      <div className="primary-selector">
+                        <label>Primary Dataset:</label>
+                        <select 
+                          value={primaryIndex} 
+                          onChange={(e) => setPrimaryIndex(Number(e.target.value))}
+                          className="select-styled"
+                        >
+                          {files.map((f, idx) => (
+                            <option key={idx} value={idx}>{f.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="relationship-mappings">
                         {files.map((f, idx) => (
-                          <option key={idx} value={idx}>{f.name}</option>
+                          idx !== primaryIndex && (
+                            <div key={idx} className="relationship-item">
+                              <div className="relationship-label">
+                                <span className="primary-file">{files[primaryIndex]?.name}</span>
+                                <span className="relationship-arrow">↔</span>
+                                <span className="related-file">{f.name}</span>
+                              </div>
+                              <select
+                                value={relationships[idx] || "1:1"}
+                                onChange={(e) => setRelationships((prev) => ({ ...prev, [idx]: e.target.value }))}
+                                className="select-styled"
+                              >
+                                <option value="1:1">One-to-One (1:1)</option>
+                                <option value="1:M">One-to-Many (1:M)</option>
+                                <option value="M:1">Many-to-One (M:1)</option>
+                                <option value="M:N">Many-to-Many (M:N)</option>
+                              </select>
+                            </div>
+                          )
                         ))}
-                      </select>
+                      </div>
                     </div>
-                    {files.map((f, idx) => (
-                      idx !== primaryIndex && (
-                        <div key={idx} className="relationship-row">
-                          <span>{files[primaryIndex]?.name} ↔ {f.name}</span>
-                          <select
-                            value={relationships[idx] || "1:1"}
-                            onChange={(e) => setRelationships((prev) => ({ ...prev, [idx]: e.target.value }))}
-                          >
-                            <option value="1:1">1:1</option>
-                            <option value="1:M">1:M</option>
-                            <option value="M:1">M:1</option>
-                            <option value="M:N">M:N</option>
-                          </select>
-                        </div>
-                      )
-                    ))}
                   </div>
                 )}
               </div>
@@ -475,7 +482,7 @@ const FileUpload = () => {
             </div>
 
             {/* 4) Outputs */}
-            {crossResults && (
+            {crossResults && crossResults.total_anomalies > 0 && (
               <div className="card nested-card analysis-card">
                 <h4>Cross-Table Anomalies</h4>
                 <p><b>Primary:</b> {crossResults.primary}</p>
@@ -555,13 +562,75 @@ const FileUpload = () => {
                                     const summary = String(analysis[index].formatted_output);
                                     const recIndex = summary.indexOf('RECOMMENDATIONS:');
                                     if (recIndex !== -1) {
+                                      const recommendations = summary.slice(recIndex + 'RECOMMENDATIONS:'.length).trim();
+                                      const qualityScoreMatch = summary.match(/Data quality score:\s*(\d+(?:\.\d+)?)%/);
+                                      const qualityScore = qualityScoreMatch ? parseFloat(qualityScoreMatch[1]) : null;
+                                      
                                       return (
                                         <>
-                                          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{summary.slice(0, recIndex).trim()}</pre>
-                                          <div className="recommendations" style={{ marginTop: 12 }}>
-                                            <strong>Recommendations:</strong>
-                                            <p style={{ marginTop: 6 }}>{summary.slice(recIndex + 'RECOMMENDATIONS:'.length).trim()}</p>
+                                          <div style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+                                            {(() => {
+                                              const summaryText = summary.slice(0, recIndex).trim();
+                                              const lines = summaryText.split('\n');
+                                              const filteredLines = lines.filter((line, index) => {
+                                                // Only show lines with detected anomalies (non-zero counts)
+                                                if (line.includes('detected:')) {
+                                                  const match = line.match(/detected:\s*(\d+)/);
+                                                  if (match && parseInt(match[1]) === 0) {
+                                                    return false;
+                                                  }
+                                                }
+                                                // Also filter out LightGBM failure messages
+                                                if (line.includes('✗ LightGBM anomaly detection failed:')) {
+                                                  return false;
+                                                }
+                                                // Remove duplicate summary lines (keep only first occurrence)
+                                                if (line.includes('Total anomalies found (events):') || 
+                                                    line.includes('Unique rows flagged:')) {
+                                                  const firstOccurrence = lines.findIndex(l => l === line);
+                                                  if (firstOccurrence !== index) {
+                                                    return false;
+                                                  }
+                                                }
+                                                // Remove Anomaly breakdown line completely
+                                                if (line.includes('Anomaly breakdown by method:')) {
+                                                  return false;
+                                                }
+                                                return true;
+                                              });
+                                              
+                                              // Convert technical logs to user-friendly text
+                                              const userFriendlyLines = filteredLines.map(line => {
+                                                if (line.includes('📋 ANOMALY DETECTION SUMMARY:')) {
+                                                  return '📊 Analysis Summary:';
+                                                }
+                                                if (line.includes('Total anomalies found (events):')) {
+                                                  return line.replace('Total anomalies found (events):', 'Total Issues Found:');
+                                                }
+                                                if (line.includes('Unique rows flagged:')) {
+                                                  return line.replace('Unique rows flagged:', 'Affected Rows:');
+                                                }
+                                                if (line.includes('Data quality score:')) {
+                                                  return line.replace('Data quality score:', 'Data Quality:');
+                                                }
+                                                if (line.includes('Methods used:')) {
+                                                  return line.replace('Methods used:', 'Detection Methods:');
+                                                }
+                                                if (line.includes('detected:')) {
+                                                  return line.replace('detected:', 'found:');
+                                                }
+                                                return line;
+                                              });
+                                              
+                                              return userFriendlyLines.join('\n');
+                                            })()}
                                           </div>
+                                          {qualityScore !== 100 && (
+                                            <div className="recommendations" style={{ marginTop: 12 }}>
+                                              <strong>Recommendations:</strong>
+                                              <p style={{ marginTop: 6 }}>{recommendations}</p>
+                                            </div>
+                                          )}
                                         </>
                                       );
                                     }

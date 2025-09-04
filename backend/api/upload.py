@@ -8,11 +8,7 @@ from typing import List
 import pandas as pd
 import io
 import re
-import psycopg2
-from psycopg2 import sql
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from ml.anomaly_checker import run_comprehensive_anomaly_detection
-from sqlalchemy import create_engine
 import random
 import numpy as np
 import math

@@ -288,42 +288,47 @@ body::before {
 
 .header h1 {
   margin: 0;
-  font-size: clamp(3rem, 6vw, 5rem);
-  font-weight: 900;
-  letter-spacing: -0.05em;
-  line-height: 0.95;
-  background: linear-gradient(
-    135deg,
-    var(--color-primary) 0%,
-    var(--color-accent) 50%,
-    var(--color-primary) 100%
-  );
-  background-size: 300% 300%;
+  font-size: clamp(3rem, 5vw, 4.5rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: gradient-shift 6s ease-in-out infinite;
+  text-align: center;
+  font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   position: relative;
-  filter: drop-shadow(0 4px 8px rgba(91, 79, 255, 0.1));
+  text-shadow: 0 2px 4px rgba(52, 152, 219, 0.1);
+}
+
+.header h1::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 3px;
+  background: linear-gradient(90deg, #3498db, #2980b9);
+  border-radius: 2px;
+  opacity: 0.8;
 }
 
 .header h1::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.4) var(--shimmer-position),
-    transparent 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: shimmer 3s ease-in-out infinite;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 2px;
+  background: linear-gradient(90deg, #3498db, #2980b9);
+  border-radius: 1px;
+  opacity: 0.6;
 }
+
+
 
 .header p {
   margin: 1.5rem 0 0 0;
@@ -1208,4 +1213,222 @@ body::before {
   color: #b8860b;
   display: block;
   margin-bottom: 0.5rem;
+}
+
+/* Mode Selector Styles */
+.mode-selector {
+  margin: 20px 0;
+  padding: 20px;
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  border-radius: 12px;
+  color: white;
+}
+
+.mode-selector h4 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.radio-group {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.radio-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 200px;
+  backdrop-filter: blur(10px);
+}
+
+.radio-option:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+}
+
+.radio-option.active {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.radio-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.radio-custom {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.radio-option.active .radio-custom {
+  border-color: #fff;
+  background: #fff;
+}
+
+.radio-option.active .radio-custom::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: #3498db;
+  border-radius: 50%;
+}
+
+.radio-label {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.radio-description {
+  font-size: 14px;
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
+/* Relationship Styles */
+.relationships {
+  margin: 20px 0;
+  padding: 20px;
+  background: linear-gradient(135deg, #2980b9 0%, #1f5f8b 100%);
+  border-radius: 12px;
+  color: white;
+}
+
+.relationships h4 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.relationship-config {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.primary-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.primary-selector label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.select-styled {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.select-styled:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.select-styled:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
+.select-styled option {
+  background: #2980b9;
+  color: white;
+}
+
+.relationship-mappings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.relationship-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+.relationship-item:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateX(4px);
+}
+
+.relationship-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.primary-file {
+  color: #85c1e9;
+  font-weight: 600;
+}
+
+.relationship-arrow {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.related-file {
+  color: #aed6f1;
+  font-weight: 600;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .radio-group {
+    flex-direction: column;
+  }
+  
+  .relationship-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .primary-selector {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

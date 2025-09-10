@@ -5,19 +5,15 @@ def detect_numeric_anomalies(df: pd.DataFrame, z_thresh=3):
     results = []
 
     for col in df.select_dtypes(include=['number']).columns:
-        # Get the series for this column and drop NA values
         series = df[col].dropna()
-        
-        # Skip if not enough data points
         if len(series) < 10:
             continue
-            
-        # Convert to numeric type to ensure we're working with numbers
+
         series = pd.to_numeric(series, errors='coerce').dropna()
-        
-        if len(series) < 10:  # Check again after conversion
+
+        if len(series) < 10:
             continue
-            
+
         z_scores = stats.zscore(series)
         z_anomalies = series[(abs(z_scores) > z_thresh)]
 
@@ -37,6 +33,3 @@ def detect_numeric_anomalies(df: pd.DataFrame, z_thresh=3):
             })
     
     return pd.DataFrame(results)
-
-
-

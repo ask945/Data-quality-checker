@@ -12,9 +12,7 @@ from ml.anomaly_scorer import calculate_anomaly_scores, filter_high_confidence_a
 def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mode: str = "sql") -> Dict:
     results = {}
 
-    # Common anomaly checks for both SQL and ML modes
     if mode in ("sql", "ml"):
-        # 1. Numeric anomalies
         try:
             numeric_results = detect_numeric_anomalies(df)
             results['numeric'] = numeric_results
@@ -23,7 +21,6 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             print(f"✗ Numeric anomaly detection failed: {e}")
             results['numeric'] = pd.DataFrame()
 
-        # 2. Categorical anomalies
         try:
             categorical_results = detect_categorical_anomalies(df)
             results['categorical'] = categorical_results
@@ -32,7 +29,6 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             print(f"✗ Categorical anomaly detection failed: {e}")
             results['categorical'] = pd.DataFrame()
 
-        # 3. LightGBM anomalies
         try:
             model, label_encoders = train_lightgbm_anomaly_detector(df, contamination)
             lightgbm_results, predictions = detect_lightgbm_anomalies(df, model, label_encoders)
@@ -47,10 +43,8 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             results['lightgbm_predictions'] = None
             results['feature_importance'] = pd.DataFrame()
 
-    # SQL-specific anomaly checks (ONLY when mode is "sql")
     if mode == "sql":
-        
-        # 4. Insertion anomalies
+
         try:
             insertion_results = detect_insertion_anomalies(df)
             results['insertion'] = insertion_results
@@ -59,7 +53,6 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             print(f"✗ Insertion anomaly detection failed: {e}")
             results['insertion'] = pd.DataFrame()
 
-        # 5. Deletion anomalies
         try:
             deletion_results = detect_deletion_anomalies(df)
             results['deletion'] = deletion_results
@@ -68,7 +61,6 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             print(f"✗ Deletion anomaly detection failed: {e}")
             results['deletion'] = pd.DataFrame()
 
-        # 6. Update anomalies
         try:
             update_results = detect_update_anomalies(df)
             results['update'] = update_results
@@ -83,36 +75,25 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
 
 
 def combine_anomaly_results(all_results: Dict) -> pd.DataFrame:
-    """Combine results from all detection methods"""
     
-    # Calculate scores
     scores_df = calculate_anomaly_scores(
         all_results, 
         predictions=all_results.get('lightgbm_predictions')
     )
-    
-    # Filter high confidence anomalies
+
     filtered_scores = filter_high_confidence_anomalies(scores_df, min_confidence=0.3)
-    
-    # Rank by severity
+
     ranked_scores = rank_anomalies_by_severity(filtered_scores)
     
     return ranked_scores
 
 def generate_anomaly_report(df: pd.DataFrame, anomaly_results: pd.DataFrame, feature_importance: pd.DataFrame = None) -> Dict:
-    """Generate comprehensive anomaly detection report"""
-    # Exclude feature_importance rows from anomaly_results for summary and quality metrics
     filtered_anomaly_results = anomaly_results[anomaly_results['issue_type'] != 'feature_importance'] if not anomaly_results.empty else anomaly_results
-    # Get summary statistics
     summary = get_anomaly_summary(filtered_anomaly_results)
-    # Calculate data quality metrics
     total_rows = len(df)
     anomaly_percentage = (summary['total_anomalies'] / total_rows) * 100 if total_rows > 0 else 0
-    # Data quality score (inverse of anomaly percentage)
     quality_score = max(0, 100 - anomaly_percentage)
-    # Count unique rows flagged (excluding feature_importance)
     unique_rows_flagged = filtered_anomaly_results['row_index'].nunique() if not filtered_anomaly_results.empty and 'row_index' in filtered_anomaly_results else 0
-    # Breakdown by method
     method_breakdown = filtered_anomaly_results['method'].value_counts().to_dict() if not filtered_anomaly_results.empty and 'method' in filtered_anomaly_results else {}
     report = {
         'dataset_info': {
@@ -135,11 +116,9 @@ def generate_anomaly_report(df: pd.DataFrame, anomaly_results: pd.DataFrame, fea
     return report
 
 def get_anomaly_recommendations(report: Dict) -> List[str]:
-    """Generate recommendations based on anomaly analysis"""
     
     recommendations = []
     
-    # Quality score recommendations
     quality_score = report['quality_metrics']['quality_score']
     if quality_score < 50:
         recommendations.append("⚠️ Critical: Data quality is very poor. Immediate data cleaning required.")
@@ -147,8 +126,7 @@ def get_anomaly_recommendations(report: Dict) -> List[str]:
         recommendations.append("⚠️ Warning: Data quality needs improvement. Consider data cleaning.")
     else:
         recommendations.append("✅ Good: Data quality is acceptable.")
-    
-    # Method-specific recommendations
+
     methods_used = report['anomaly_summary']['methods_used']
     if 'numeric' in methods_used:
         recommendations.append("📊 Numeric outliers detected. Review extreme values in numeric columns.")
@@ -168,7 +146,6 @@ def get_anomaly_recommendations(report: Dict) -> List[str]:
     if 'update' in methods_used:
         recommendations.append("✏️ Update anomalies detected. Look for inconsistent updates, partial updates, or data type violations.")
 
-    # Feature importance recommendations
     if report['feature_importance']:
         top_feature = report['feature_importance'][0]['feature']
         recommendations.append(f"🎯 Focus on column '{top_feature}' - it contributes most to anomalies.")

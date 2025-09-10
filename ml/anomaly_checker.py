@@ -14,7 +14,6 @@ def run_comprehensive_anomaly_detection(df: pd.DataFrame, contamination: float =
     old_stdout = sys.stdout
     sys.stdout = log_stream
     try:
-        # Replace all string 'NULL' (case-insensitive) with np.nan for compatibility
         def null_to_nan(val):
             if isinstance(val, str) and re.fullmatch(r'null', val, re.IGNORECASE):
                 return np.nan

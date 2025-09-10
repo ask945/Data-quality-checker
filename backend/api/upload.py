@@ -1,12 +1,10 @@
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Form
-from fastapi import Body
+from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Form, Body
 from fastapi.responses import JSONResponse
 from typing import List
 import pandas as pd
-import io
 import re
 from ml.anomaly_checker import run_comprehensive_anomaly_detection
 import random
@@ -15,10 +13,9 @@ import math
 
 router = APIRouter()
 
-# Global in-memory cache for uploaded tables
 in_memory_tables = {}
 
-# Store last upload mapping from filename to table_name to help with relationship analysis
+
 last_filename_to_table = {}
 
 def sanitize_columns(df):
@@ -39,12 +36,10 @@ def infer_sql_type(dtype):
         return "TEXT"
 
 def process_single_file(file: UploadFile, analysis_type: str):
-    """Process a single uploaded file and return its analysis results"""
     filename = file.filename
     ext = os.path.splitext(filename)[-1].lower()
     
     try:
-        # Reset file pointer to beginning
         file.file.seek(0)
         
         if ext == ".csv":
@@ -67,13 +62,13 @@ def process_single_file(file: UploadFile, analysis_type: str):
 
     df = df.applymap(null_to_nan)
     
-    # Generate unique table name with timestamp to avoid conflicts
+    
     base_name = os.path.splitext(os.path.basename(filename))[0].replace("-", "_").replace(" ", "_").lower()
     table_name = f"{base_name}_{hash(filename) % 10000}"
     
-    # Store in memory
+   
     in_memory_tables[table_name] = df
-    # Track filename to table mapping
+
     try:
         global last_filename_to_table
         last_filename_to_table[filename] = table_name
@@ -83,8 +78,7 @@ def process_single_file(file: UploadFile, analysis_type: str):
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
 
-    # Run anomaly checker based on analysis_type
-    print(f"🔍 Running anomaly detection for {filename} in mode: {analysis_type}")
+    
     results = run_comprehensive_anomaly_detection(df, mode=analysis_type)
     report = results['report']
     recommendations = results['recommendations']
@@ -116,22 +110,17 @@ def process_single_file(file: UploadFile, analysis_type: str):
     }
 
 def sanitize_for_json(obj):
-    """Recursively convert NaN/Inf and numpy/pandas types to JSON-safe Python types."""
-    # Handle numpy scalar types
     if isinstance(obj, (np.floating, np.integer, np.bool_)):
         obj = obj.item()
-    # Handle floats with NaN/Inf
     if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
-    # Handle dictionaries
+   
     if isinstance(obj, dict):
         return {str(k): sanitize_for_json(v) for k, v in obj.items()}
-    # Handle iterables
     if isinstance(obj, (list, tuple, set)):
         return [sanitize_for_json(v) for v in obj]
-    # Handle pandas objects
     if isinstance(obj, pd.Series):
         return sanitize_for_json(obj.to_dict())
     if isinstance(obj, pd.DataFrame):
@@ -159,7 +148,6 @@ def upload_multiple_files(
     analysis_type: str = Query("sql", enum=["sql", "ml"]),
     relationships: str | None = Form(None)
 ):
-    """Multiple files upload endpoint"""
     random.seed(42)
     np.random.seed(42)
     
@@ -191,7 +179,7 @@ def upload_multiple_files(
         "results": results,
         "errors": errors if errors else None
     }
-    # Attach relationships metadata back to response if provided
+   
     if relationships:
         try:
             import json
@@ -199,7 +187,6 @@ def upload_multiple_files(
         except Exception:
             response_data["relationships"] = {"raw": relationships}
 
-    # Include filename->table mapping for client convenience
     if filename_to_table:
         response_data["filename_to_table"] = filename_to_table
 
@@ -209,39 +196,34 @@ def upload_multiple_files(
 def _normalize_name(name: str) -> str:
     import re
     s = name.lower()
-    s = re.sub(r"[^a-z0-9]", "", s)  # remove non-alnum
+    s = re.sub(r"[^a-z0-9]", "", s)  
     return s
 
 
 def _variants(name: str) -> List[str]:
     base = _normalize_name(name)
     variants = {base}
-    # remove common suffixes/prefixes
     for suffix in ("id", "key", "no", "num", "code"):
         if base.endswith(suffix) and len(base) > len(suffix) + 1:
             variants.add(base[: -len(suffix)])
-    # add with id/key suffix
     variants.add(base + "id")
     variants.add(base + "key")
     return list(variants)
 
 
 def _infer_join_keys(df_primary: pd.DataFrame, df_other: pd.DataFrame) -> List[str]:
-    """Infer potential join keys based on common columns and fuzzy naming heuristics."""
-    # Exact common columns
     common = [c for c in df_primary.columns if c in df_other.columns]
     preferred = [c for c in common if c.lower() in ("id", "key") or c.endswith("_id") or c.endswith("Id")]
     if preferred or common:
         return preferred or common[:1]
 
-    # Fuzzy match: find pairs whose normalized variants intersect
     best_match = None
     for c1 in df_primary.columns:
         v1 = set(_variants(c1))
         for c2 in df_other.columns:
             v2 = set(_variants(c2))
             if v1 & v2:
-                # Prefer id-like names
+                
                 score = 0
                 if c1.lower().endswith(("id", "Id")) or c2.lower().endswith(("id", "Id")):
                     score += 2
@@ -253,7 +235,6 @@ def _infer_join_keys(df_primary: pd.DataFrame, df_other: pd.DataFrame) -> List[s
 
 
 def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str], relation_type: str) -> List[dict]:
-    """Validate simple cardinality rules based on relation_type using inferred keys."""
     issues = []
     if not keys:
         return issues
@@ -265,7 +246,6 @@ def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
     other_dupes = df_other.duplicated(subset=[key], keep=False)
 
     if relation_type == "1:1":
-        # No duplicates allowed in either side for key
         if primary_dupes.any():
             for idx in df_primary[primary_dupes].index[:50]:
                 issues.append({
@@ -279,7 +259,6 @@ def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
                     "details": f"1:1 requires unique '{key}' in related; duplicate at row {int(idx)}",
                 })
     elif relation_type == "1:M":
-        # Primary must be unique; other may repeat
         if primary_dupes.any():
             for idx in df_primary[primary_dupes].index[:50]:
                 issues.append({
@@ -287,19 +266,16 @@ def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
                     "details": f"1:M requires unique '{key}' in primary; duplicate at row {int(idx)}",
                 })
     elif relation_type == "M:1":
-        # Other must be unique; primary may repeat
         if other_dupes.any():
             for idx in df_other[other_dupes].index[:50]:
                 issues.append({
                     "issue_type": "cardinality_violation",
                     "details": f"M:1 requires unique '{key}' in related; duplicate at row {int(idx)}",
                 })
-    # M:N: no uniqueness constraints here
     return issues
 
 
 def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str]) -> List[dict]:
-    """Detect orphan records on either side based on join keys (deletion/insertion anomalies)."""
     issues = []
     if not keys:
         return issues
@@ -309,7 +285,6 @@ def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
     primary_keys = set(df_primary[key].dropna().astype(str))
     other_keys = set(df_other[key].dropna().astype(str))
 
-    # Child (other) orphans: keys not present in primary
     missing_in_primary = other_keys - primary_keys
     if missing_in_primary:
         issues.append({
@@ -317,7 +292,6 @@ def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
             "details": f"{len(missing_in_primary)} keys in related not present in primary for key '{key}'",
         })
 
-    # Parent (primary) unreferenced: keys present in primary not referenced by other
     missing_in_other = primary_keys - other_keys
     if missing_in_other:
         issues.append({
@@ -328,7 +302,6 @@ def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
 
 
 def _check_conflicting_values(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str]) -> List[dict]:
-    """Detect inconsistent values across overlapping non-key columns for same key (update anomalies)."""
     issues = []
     if not keys:
         return issues
@@ -339,7 +312,7 @@ def _check_conflicting_values(df_primary: pd.DataFrame, df_other: pd.DataFrame, 
     overlap_cols = [c for c in df_primary.columns if c in df_other.columns and c != key]
     if not overlap_cols:
         return issues
-    # Join on key
+    
     merged = df_primary[[key] + overlap_cols].merge(
         df_other[[key] + overlap_cols], on=key, how="inner", suffixes=("_primary", "_related")
     )
@@ -359,14 +332,12 @@ def _check_conflicting_values(df_primary: pd.DataFrame, df_other: pd.DataFrame, 
 def analyze_relationships(
     payload: dict = Body(..., description="Relationships and file contexts for cross-table analysis")
 ):
-    """Analyze cross-table anomalies based on provided relationships and uploaded tables in memory."""
     try:
         relationships = payload.get("relationships") or {}
         file_contexts = payload.get("files") or []
-        # Build filename->table mapping
+      
         filename_to_table = {ctx.get("filename"): ctx.get("table_name") for ctx in file_contexts if ctx.get("filename") and ctx.get("table_name")}
         if not filename_to_table:
-            # Fall back to last known mapping if available
             filename_to_table = last_filename_to_table.copy()
 
         primary_idx = relationships.get("primaryIndex")
@@ -410,7 +381,6 @@ def analyze_relationships(
                 "anomalies": anomalies,
             })
 
-        # Summarize
         total_anomalies = sum(len(r.get("anomalies", [])) for r in relation_results)
         return JSONResponse(sanitize_for_json({
             "primary": primary_filename,
@@ -448,9 +418,6 @@ def analyze_table(
     df = df.applymap(null_to_nan)
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
-
-    # Run anomaly checker based on analysis_type
-    print(f"🔍 Running anomaly detection for table {table_name} in mode: {analysis_type}")
     results = run_comprehensive_anomaly_detection(df, mode=analysis_type)
     report = results['report']
     recommendations = results['recommendations']
@@ -481,7 +448,6 @@ def analyze_table(
 
 @router.get("/tables")
 def list_tables():
-    """Get list of all uploaded tables in memory"""
     tables_info = []
     for table_name, df in in_memory_tables.items():
         tables_info.append({
@@ -498,7 +464,6 @@ def list_tables():
 
 @router.delete("/tables/{table_name}")
 def delete_table(table_name: str):
-    """Delete a specific table from memory"""
     if table_name in in_memory_tables:
         del in_memory_tables[table_name]
         return JSONResponse({"message": f"Table '{table_name}' deleted successfully"})
@@ -507,7 +472,6 @@ def delete_table(table_name: str):
 
 @router.delete("/tables")
 def clear_all_tables():
-    """Clear all tables from memory"""
     cleared_count = len(in_memory_tables)
     in_memory_tables.clear()
     return JSONResponse({"message": f"Cleared {cleared_count} tables from memory"})

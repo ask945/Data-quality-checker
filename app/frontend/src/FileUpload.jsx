@@ -10,7 +10,7 @@ const FileUpload = () => {
   const [analyzing, setAnalyzing] = useState({});
   const [analyzeType, setAnalyzeType] = useState("sql");
   const [primaryIndex, setPrimaryIndex] = useState(0);
-  const [relationships, setRelationships] = useState({}); // key: file index (non-primary) -> relation type
+  const [relationships, setRelationships] = useState({});
   const [serverRelationships, setServerRelationships] = useState(null);
 
   const [crossResults, setCrossResults] = useState(null);
@@ -19,9 +19,8 @@ const FileUpload = () => {
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
     
-    // If ML mode is selected, only allow single file
     if (analyzeType === "ml" && selectedFiles.length > 1) {
-      setFiles([selectedFiles[0]]); // Take only the first file
+      setFiles([selectedFiles[0]]);
       setError("ML mode only supports single file upload. Only the first file was selected.");
     } else {
       setFiles(selectedFiles);
@@ -51,9 +50,8 @@ const FileUpload = () => {
     const droppedFiles = Array.from(e.dataTransfer.files);
     
     if (droppedFiles.length > 0) {
-      // If ML mode is selected, only allow single file
       if (analyzeType === "ml" && droppedFiles.length > 1) {
-        setFiles([droppedFiles[0]]); // Take only the first file
+        setFiles([droppedFiles[0]]);
         setError("ML mode only supports single file upload. Only the first file was selected.");
       } else {
         setFiles(droppedFiles);
@@ -76,7 +74,7 @@ const FileUpload = () => {
     setResults([]);
     
     try {
-      // Use single file endpoint for ML mode or when only one file
+      
       if (analyzeType === "ml" || files.length === 1) {
         const formData = new FormData();
         formData.append("file", files[0]);
@@ -91,12 +89,11 @@ const FileUpload = () => {
         
         setResults([{ ...res.data, filename: files[0].name }]);
       } else {
-        // Use multiple file endpoint for SQL mode with multiple files
         const formData = new FormData();
         files.forEach((file) => {
           formData.append("files", file);
         });
-        // Attach relationships metadata (by filename) if present
+        
         try {
           const relationsPayload = {
             primaryIndex,
@@ -116,7 +113,6 @@ const FileUpload = () => {
           }
         );
         
-        // Handle the response from the new endpoint
         if (res.data.results) {
           setResults(res.data.results);
           if (res.data.relationships) {
@@ -124,10 +120,8 @@ const FileUpload = () => {
           } else {
             setServerRelationships(null);
           }
-          // Reset cross-table results on new upload
           setCrossResults(null);
           
-          // Show summary of upload results
           if (res.data.failed_uploads > 0) {
             setError(`${res.data.successful_uploads} files uploaded successfully, ${res.data.failed_uploads} failed`);
           }
@@ -160,7 +154,6 @@ const FileUpload = () => {
     setCrossResults(null);
     setAnalysis({});
     try {
-      // Run per-table analyses sequentially to keep UI state simple
       for (let i = 0; i < results.length; i++) {
         const tableName = results[i].table_name;
         try {
@@ -170,7 +163,6 @@ const FileUpload = () => {
           setAnalysis(prev => ({ ...prev, [i]: { error: err.response?.data?.detail || "Analysis failed" } }));
         }
       }
-      // Run cross-table analysis if relationships exist and more than one table
       if (serverRelationships && results.length > 1) {
         const payload = {
           relationships: serverRelationships,
@@ -180,7 +172,6 @@ const FileUpload = () => {
           const res = await axios.post(`http://localhost:8000/analyze-relationships`, payload);
           setCrossResults(res.data);
         } catch (err) {
-          // Keep per-table results even if cross-table fails
           setError(err.response?.data?.detail || "Cross-table analysis failed");
         }
       }
@@ -191,7 +182,6 @@ const FileUpload = () => {
 
   const removeFile = (indexToRemove) => {
     setFiles(files.filter((_, index) => index !== indexToRemove));
-    // Adjust relationships and primary if necessary
     setRelationships((prev) => {
       const updated = {};
       Object.entries(prev).forEach(([idx, rel]) => {
@@ -324,7 +314,7 @@ const FileUpload = () => {
                 id="file-upload"
                 type="file"
                 accept=".csv,.xlsx,.xls,.json"
-                multiple={analyzeType !== "ml"} // Disable multiple for ML mode
+                multiple={analyzeType !== "ml"}
                 onChange={handleFileChange}
                 disabled={uploading}
               />
@@ -433,7 +423,6 @@ const FileUpload = () => {
               </button>
             </div>
 
-            {/* 1) Previews of tables */}
             <div className="card nested-card">
               <h4>Previews</h4>
               {results.map((result, index) => (
@@ -454,7 +443,6 @@ const FileUpload = () => {
               ))}
             </div>
 
-            {/* 2) Defined Relationships */}
             {Array.isArray(results) && results.length > 1 && serverRelationships && (
               <div className="card nested-card">
                 <h4>Defined Relationships</h4>
@@ -474,14 +462,12 @@ const FileUpload = () => {
               </div>
             )}
 
-            {/* 3) Run Anomaly Check button */}
             <div className="actions" style={{ marginBottom: 16 }}>
               <button className="buttonSecondary" disabled={analyzingAll} onClick={handleAnalyzeAll}>
                 {analyzingAll ? (<><span className="spinner" /> Running anomaly checks...</>) : ("Run Anomaly Check")}
               </button>
             </div>
 
-            {/* 4) Outputs */}
             {crossResults && crossResults.total_anomalies > 0 && (
               <div className="card nested-card analysis-card">
                 <h4>Cross-Table Anomalies</h4>
@@ -538,8 +524,6 @@ const FileUpload = () => {
                       <h4>{result.filename || result.table_name}</h4>
                       <span className="table-name">Table: {result.table_name}</span>
                     </div>
-                    {/* Preview moved to Previews section above */}
-                    {/* Per-file run button removed in favor of unified Run Anomaly Check */}
 
                     {analyzing[index] && (
                       <div className="spinner-container">
@@ -573,18 +557,18 @@ const FileUpload = () => {
                                               const summaryText = summary.slice(0, recIndex).trim();
                                               const lines = summaryText.split('\n');
                                               const filteredLines = lines.filter((line, index) => {
-                                                // Only show lines with detected anomalies (non-zero counts)
+                                              
                                                 if (line.includes('detected:')) {
                                                   const match = line.match(/detected:\s*(\d+)/);
                                                   if (match && parseInt(match[1]) === 0) {
                                                     return false;
                                                   }
                                                 }
-                                                // Also filter out LightGBM failure messages
+                                               
                                                 if (line.includes('✗ LightGBM anomaly detection failed:')) {
                                                   return false;
                                                 }
-                                                // Remove duplicate summary lines (keep only first occurrence)
+                                               
                                                 if (line.includes('Total anomalies found (events):') || 
                                                     line.includes('Unique rows flagged:')) {
                                                   const firstOccurrence = lines.findIndex(l => l === line);
@@ -592,14 +576,14 @@ const FileUpload = () => {
                                                     return false;
                                                   }
                                                 }
-                                                // Remove Anomaly breakdown line completely
+                                               
                                                 if (line.includes('Anomaly breakdown by method:')) {
                                                   return false;
                                                 }
                                                 return true;
                                               });
                                               
-                                              // Convert technical logs to user-friendly text
+                                              
                                               const userFriendlyLines = filteredLines.map(line => {
                                                 if (line.includes('📋 ANOMALY DETECTION SUMMARY:')) {
                                                   return '📊 Analysis Summary:';

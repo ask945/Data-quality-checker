@@ -21,9 +21,9 @@ def calculate_anomaly_scores(anomaly_results: Dict[str, pd.DataFrame], predictio
 
 def set_anomaly_thresholds(method: str) -> float:
     thresholds = {
-        'numeric_outlier': 0.7,  # Z-score/IQR methods
-        'rare_category': 0.8,    # Frequency-based
-        'complex_pattern_anomaly': 0.5,  # LightGBM predictions
+        'numeric_outlier': 0.7,
+        'rare_category': 0.8,
+        'complex_pattern_anomaly': 0.5,
         'duplicate_record': 1.0,
         'missing_required_field': 0.9,
         'invalid_foreign_key': 0.8,

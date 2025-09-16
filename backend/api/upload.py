@@ -14,8 +14,6 @@ import math
 router = APIRouter()
 
 in_memory_tables = {}
-
-
 last_filename_to_table = {}
 
 def sanitize_columns(df):
@@ -62,11 +60,9 @@ def process_single_file(file: UploadFile, analysis_type: str):
 
     df = df.applymap(null_to_nan)
     
-    
     base_name = os.path.splitext(os.path.basename(filename))[0].replace("-", "_").replace(" ", "_").lower()
     table_name = f"{base_name}_{hash(filename) % 10000}"
     
-   
     in_memory_tables[table_name] = df
 
     try:
@@ -78,7 +74,6 @@ def process_single_file(file: UploadFile, analysis_type: str):
     schema = df.dtypes.apply(lambda x: str(x)).to_dict()
     sample = df.head(10).where(pd.notnull(df.head(10)), None).to_dict(orient="records")
 
-    
     results = run_comprehensive_anomaly_detection(df, mode=analysis_type)
     report = results['report']
     recommendations = results['recommendations']
@@ -192,13 +187,11 @@ def upload_multiple_files(
 
     return JSONResponse(sanitize_for_json(response_data))
 
-
 def _normalize_name(name: str) -> str:
     import re
     s = name.lower()
     s = re.sub(r"[^a-z0-9]", "", s)  
     return s
-
 
 def _variants(name: str) -> List[str]:
     base = _normalize_name(name)
@@ -209,7 +202,6 @@ def _variants(name: str) -> List[str]:
     variants.add(base + "id")
     variants.add(base + "key")
     return list(variants)
-
 
 def _infer_join_keys(df_primary: pd.DataFrame, df_other: pd.DataFrame) -> List[str]:
     common = [c for c in df_primary.columns if c in df_other.columns]
@@ -223,7 +215,6 @@ def _infer_join_keys(df_primary: pd.DataFrame, df_other: pd.DataFrame) -> List[s
         for c2 in df_other.columns:
             v2 = set(_variants(c2))
             if v1 & v2:
-                
                 score = 0
                 if c1.lower().endswith(("id", "Id")) or c2.lower().endswith(("id", "Id")):
                     score += 2
@@ -233,6 +224,91 @@ def _infer_join_keys(df_primary: pd.DataFrame, df_other: pd.DataFrame) -> List[s
                     best_match = (score, c1)
     return [best_match[1]] if best_match else []
 
+def _infer_self_relationship_keys(df: pd.DataFrame) -> List[str]:
+    """Infer potential self-relationship keys within the same table"""
+    candidates = []
+    
+    # Look for common self-reference patterns
+    for col in df.columns:
+        col_lower = col.lower()
+        if any(pattern in col_lower for pattern in ['parent', 'manager', 'superior', 'leader', 'ref']):
+            candidates.append(col)
+        elif col_lower.endswith('_id') and col_lower != 'id':
+            # Check if there's a corresponding 'id' column
+            if 'id' in df.columns:
+                candidates.append(col)
+    
+    # If no obvious candidates, look for columns that reference the primary key
+    if not candidates and 'id' in df.columns:
+        for col in df.columns:
+            if col != 'id' and df[col].dtype == df['id'].dtype:
+                # Check if values in this column exist in the id column
+                common_values = set(df[col].dropna()) & set(df['id'].dropna())
+                if len(common_values) > 0:
+                    candidates.append(col)
+    
+    return candidates[:1] if candidates else ['id'] if 'id' in df.columns else []
+
+def _check_self_relationship(df: pd.DataFrame, keys: List[str], relation_type: str) -> List[dict]:
+    """Check anomalies in self-relationships"""
+    issues = []
+    
+    if not keys or keys[0] not in df.columns:
+        issues.append({
+            "issue_type": "missing_self_reference_key",
+            "details": "No suitable self-reference key found for relationship analysis"
+        })
+        return issues
+    
+    key = keys[0]
+    
+    # Check for circular references
+    if 'id' in df.columns and key != 'id':
+        id_to_parent = dict(zip(df['id'].dropna(), df[key].dropna()))
+        
+        for row_id, parent_id in id_to_parent.items():
+            visited = set()
+            current = parent_id
+            path_length = 0
+            
+            while current in id_to_parent and current not in visited and path_length < 100:
+                visited.add(current)
+                current = id_to_parent[current]
+                path_length += 1
+                
+                if current == row_id:
+                    issues.append({
+                        "issue_type": "circular_reference",
+                        "details": f"Circular reference detected for ID {row_id} through {key}"
+                    })
+                    break
+                    
+                if path_length >= 100:
+                    issues.append({
+                        "issue_type": "deep_hierarchy",
+                        "details": f"Very deep hierarchy (>100 levels) detected starting from ID {row_id}"
+                    })
+                    break
+    
+    # Check for orphaned references
+    if 'id' in df.columns and key != 'id':
+        valid_ids = set(df['id'].dropna().astype(str))
+        referenced_ids = set(df[key].dropna().astype(str))
+        orphaned = referenced_ids - valid_ids
+        
+        if orphaned and len(orphaned) <= 10:
+            for orphan_id in list(orphaned)[:10]:
+                issues.append({
+                    "issue_type": "orphaned_reference",
+                    "details": f"Reference to non-existent ID: {orphan_id}"
+                })
+        elif orphaned:
+            issues.append({
+                "issue_type": "orphaned_reference",
+                "details": f"{len(orphaned)} references to non-existent IDs"
+            })
+    
+    return issues
 
 def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str], relation_type: str) -> List[dict]:
     issues = []
@@ -274,7 +350,6 @@ def _check_cardinality(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
                 })
     return issues
 
-
 def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str]) -> List[dict]:
     issues = []
     if not keys:
@@ -299,7 +374,6 @@ def _check_referential(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: L
             "details": f"{len(missing_in_other)} keys in primary not referenced by related for key '{key}'",
         })
     return issues
-
 
 def _check_conflicting_values(df_primary: pd.DataFrame, df_other: pd.DataFrame, keys: List[str]) -> List[dict]:
     issues = []
@@ -327,7 +401,6 @@ def _check_conflicting_values(df_primary: pd.DataFrame, df_other: pd.DataFrame, 
             })
     return issues
 
-
 @router.post("/analyze-relationships")
 def analyze_relationships(
     payload: dict = Body(..., description="Relationships and file contexts for cross-table analysis")
@@ -340,50 +413,108 @@ def analyze_relationships(
         if not filename_to_table:
             filename_to_table = last_filename_to_table.copy()
 
-        primary_idx = relationships.get("primaryIndex")
-        primary_filename = relationships.get("primaryFilename")
-        relations = relationships.get("relations", {})
-        if primary_filename is None and isinstance(primary_idx, int) and 0 <= primary_idx < len(file_contexts):
-            primary_filename = file_contexts[primary_idx].get("filename")
+        # Handle new relationship format
+        new_relationships = relationships.get("relationships", [])
+        if not new_relationships:
+            # Fallback to old format for backward compatibility
+            primary_idx = relationships.get("primaryIndex")
+            primary_filename = relationships.get("primaryFilename")
+            relations = relationships.get("relations", {})
+            if primary_filename is None and isinstance(primary_idx, int) and 0 <= primary_idx < len(file_contexts):
+                primary_filename = file_contexts[primary_idx].get("filename")
+            
+            # Convert old format to new format
+            if primary_filename and relations:
+                new_relationships = []
+                for related_filename, relation_type in relations.items():
+                    new_relationships.append({
+                        "table1": primary_filename,
+                        "table2": related_filename,
+                        "relationType": relation_type
+                    })
 
-        if not primary_filename:
-            raise HTTPException(status_code=400, detail="Primary filename not provided for relationship analysis")
-
-        primary_table = filename_to_table.get(primary_filename)
-        if not primary_table or primary_table not in in_memory_tables:
-            raise HTTPException(status_code=404, detail=f"Primary table for '{primary_filename}' not found in memory")
-
-        df_primary = in_memory_tables[primary_table]
+        if not new_relationships:
+            raise HTTPException(status_code=400, detail="No relationships provided for analysis")
 
         relation_results = []
-        for related_filename, relation_type in relations.items():
-            related_table = filename_to_table.get(related_filename)
-            if not related_table or related_table not in in_memory_tables:
+        processed_pairs = set()
+
+        for rel in new_relationships:
+            table1_name = rel.get("table1")
+            table2_name = rel.get("table2")
+            relation_type = rel.get("relationType")
+            
+            if not all([table1_name, table2_name, relation_type]):
+                continue
+            
+            # Create a sorted pair to avoid duplicate processing (except for self-relationships)
+            if table1_name == table2_name:
+                pair_key = f"self_{table1_name}_{relation_type}"
+            else:
+                pair_key = tuple(sorted([table1_name, table2_name]))
+            
+            if pair_key in processed_pairs:
+                continue
+            processed_pairs.add(pair_key)
+            
+            table1 = filename_to_table.get(table1_name)
+            table2 = filename_to_table.get(table2_name)
+            
+            if not table1 or table1 not in in_memory_tables:
                 relation_results.append({
-                    "related": related_filename,
+                    "table1": table1_name,
+                    "table2": table2_name,
                     "relation_type": relation_type,
-                    "errors": [f"Table for '{related_filename}' not found"],
+                    "errors": [f"Table for '{table1_name}' not found"],
+                    "anomalies": []
+                })
+                continue
+            
+            if not table2 or table2 not in in_memory_tables:
+                relation_results.append({
+                    "table1": table1_name,
+                    "table2": table2_name,
+                    "relation_type": relation_type,
+                    "errors": [f"Table for '{table2_name}' not found"],
                     "anomalies": []
                 })
                 continue
 
-            df_other = in_memory_tables[related_table]
-            keys = _infer_join_keys(df_primary, df_other)
-            anomalies = []
-            anomalies.extend(_check_cardinality(df_primary, df_other, keys, relation_type))
-            anomalies.extend(_check_referential(df_primary, df_other, keys))
-            anomalies.extend(_check_conflicting_values(df_primary, df_other, keys))
+            df1 = in_memory_tables[table1]
+            df2 = in_memory_tables[table2]
+            
+            # Handle self-relationships
+            if table1_name == table2_name:
+                keys = _infer_self_relationship_keys(df1)
+                anomalies = _check_self_relationship(df1, keys, relation_type)
+                
+                relation_results.append({
+                    "table1": table1_name,
+                    "table2": table2_name,
+                    "relation_type": relation_type,
+                    "join_keys": keys,
+                    "anomalies": anomalies,
+                    "self_relationship": True
+                })
+            else:
+                keys = _infer_join_keys(df1, df2)
+                anomalies = []
+                anomalies.extend(_check_cardinality(df1, df2, keys, relation_type))
+                anomalies.extend(_check_referential(df1, df2, keys))
+                anomalies.extend(_check_conflicting_values(df1, df2, keys))
 
-            relation_results.append({
-                "related": related_filename,
-                "relation_type": relation_type,
-                "join_keys": keys,
-                "anomalies": anomalies,
-            })
+                relation_results.append({
+                    "table1": table1_name,
+                    "table2": table2_name,
+                    "relation_type": relation_type,
+                    "join_keys": keys,
+                    "anomalies": anomalies,
+                    "self_relationship": False
+                })
 
         total_anomalies = sum(len(r.get("anomalies", [])) for r in relation_results)
         return JSONResponse(sanitize_for_json({
-            "primary": primary_filename,
+            "relationships": new_relationships,
             "results": relation_results,
             "total_anomalies": total_anomalies
         }))

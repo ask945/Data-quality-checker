@@ -9,8 +9,8 @@ const FileUpload = () => {
   const [analysis, setAnalysis] = useState({});
   const [analyzing, setAnalyzing] = useState({});
   const [analyzeType, setAnalyzeType] = useState("sql");
-  const [primaryIndex, setPrimaryIndex] = useState(0);
-  const [relationships, setRelationships] = useState({});
+
+  const [relationships, setRelationships] = useState([]);
   const [serverRelationships, setServerRelationships] = useState(null);
 
   const [crossResults, setCrossResults] = useState(null);
@@ -30,7 +30,7 @@ const FileUpload = () => {
     setResults([]);
     setAnalysis({});
     setPrimaryIndex(0);
-    setRelationships({});
+    setRelationships([]);
     setServerRelationships(null);
   };
 
@@ -65,7 +65,29 @@ const FileUpload = () => {
       setServerRelationships(null);
     }
   };
+  const addRelationship = () => {
+  if (files.length < 2) return;
+  
+  setRelationships(prev => [
+    ...prev,
+    {
+      id: Date.now(),
+      table1: 0,
+      table2: files.length > 1 ? 1 : 0,
+      relationType: "1:1"
+    }
+  ]);
+};
 
+const removeRelationship = (id) => {
+  setRelationships(prev => prev.filter(rel => rel.id !== id));
+};
+
+const updateRelationship = (id, field, value) => {
+  setRelationships(prev => prev.map(rel => 
+    rel.id === id ? { ...rel, [field]: value } : rel
+  ));
+};
   const handleUploadAll = async () => {
     if (files.length === 0) return;
     
@@ -96,12 +118,12 @@ const FileUpload = () => {
         
         try {
           const relationsPayload = {
-            primaryIndex,
-            primaryFilename: files[primaryIndex]?.name,
-            relations: Object.fromEntries(
-              Object.entries(relationships).map(([idx, rel]) => [files[Number(idx)]?.name, rel])
-            ),
-          };
+  relationships: relationships.map(rel => ({
+    table1: files[rel.table1]?.name,
+    table2: files[rel.table2]?.name,
+    relationType: rel.relationType
+  }))
+};
           formData.append("relationships", JSON.stringify(relationsPayload));
         } catch (_) {}
         
@@ -181,21 +203,23 @@ const FileUpload = () => {
   };
 
   const removeFile = (indexToRemove) => {
-    setFiles(files.filter((_, index) => index !== indexToRemove));
-    setRelationships((prev) => {
-      const updated = {};
-      Object.entries(prev).forEach(([idx, rel]) => {
-        const numIdx = Number(idx);
-        if (numIdx === indexToRemove) return;
-        updated[numIdx > indexToRemove ? String(numIdx - 1) : String(numIdx)] = rel;
-      });
-      return updated;
-    });
-    setPrimaryIndex((prev) => {
-      if (prev === indexToRemove) return 0;
-      return prev > indexToRemove ? prev - 1 : prev;
-    });
-  };
+  setFiles(files.filter((_, index) => index !== indexToRemove));
+  
+  // Update relationships to remove any that reference the removed file
+  setRelationships(prev => {
+    // Remove relationships that involve the deleted file
+    const filtered = prev.filter(rel => 
+      rel.table1 !== indexToRemove && rel.table2 !== indexToRemove
+    );
+    
+    // Update indices for remaining relationships
+    return filtered.map(rel => ({
+      ...rel,
+      table1: rel.table1 > indexToRemove ? rel.table1 - 1 : rel.table1,
+      table2: rel.table2 > indexToRemove ? rel.table2 - 1 : rel.table2
+    }));
+  });
+};
 
   const clearAllFiles = () => {
     setFiles([]);
@@ -207,7 +231,7 @@ const FileUpload = () => {
       fileInput.value = "";
     }
     setPrimaryIndex(0);
-    setRelationships({});
+    setRelationships([]);
     setServerRelationships(null);
   };
 
@@ -347,50 +371,83 @@ const FileUpload = () => {
                     </button>
                   </div>
                 ))}
-                {analyzeType === "sql" && files.length > 1 && (
+                {analyzeType === "sql" && files.length >= 1 && (
                   <div className="relationships">
-                    <h4>Define Relationships</h4>
-                    <div className="relationship-config">
-                      <div className="primary-selector">
-                        <label>Primary Dataset:</label>
-                        <select 
-                          value={primaryIndex} 
-                          onChange={(e) => setPrimaryIndex(Number(e.target.value))}
-                          className="select-styled"
-                        >
-                          {files.map((f, idx) => (
-                            <option key={idx} value={idx}>{f.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="relationship-mappings">
-                        {files.map((f, idx) => (
-                          idx !== primaryIndex && (
-                            <div key={idx} className="relationship-item">
-                              <div className="relationship-label">
-                                <span className="primary-file">{files[primaryIndex]?.name}</span>
-                                <span className="relationship-arrow">↔</span>
-                                <span className="related-file">{f.name}</span>
-                              </div>
-                              <select
-                                value={relationships[idx] || "1:1"}
-                                onChange={(e) => setRelationships((prev) => ({ ...prev, [idx]: e.target.value }))}
-                                className="select-styled"
-                              >
-                                <option value="1:1">One-to-One (1:1)</option>
-                                <option value="1:M">One-to-Many (1:M)</option>
-                                <option value="M:1">Many-to-One (M:1)</option>
-                                <option value="M:N">Many-to-Many (M:N)</option>
-                              </select>
-                            </div>
-                          )
-                        ))}
-                      </div>
-                    </div>
+                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <h4>Table Relationships ({relationships.length})</h4>
+                    <button
+                      onClick={addRelationship}
+                      className="buttonPrimary"
+                      style={{ padding: '8px 16px', fontSize: '0.875rem' }}
+                    >
+                      + Add Relationship
+                    </button>
                   </div>
-                )}
-              </div>
-            )}
+    
+                  {relationships.length === 0 ? (
+                <p style={{ margin: 0, color: '#6b7280', fontStyle: 'italic' }}>
+                  No relationships defined yet. Click "Add Relationship" to connect tables (including self-relationships within the same table).
+                </p>
+              ) : (
+                    <div className="relationship-mappings">
+                      {relationships.map((rel) => (
+                        <div key={rel.id} className="relationship-item">
+                          <select
+                value={rel.table1}
+                onChange={(e) => updateRelationship(rel.id, 'table1', Number(e.target.value))}
+                className="select-styled"
+              >
+                {files.map((f, idx) => (
+                  <option key={idx} value={idx}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+
+              <span className="relationship-arrow">
+                {rel.table1 === rel.table2 ? "⟲" : "↔"}
+              </span>
+
+            <select
+              value={rel.table2}
+              onChange={(e) => updateRelationship(rel.id, 'table2', Number(e.target.value))}
+              className="select-styled"
+            >
+              {files.map((f, idx) => (
+                <option key={idx} value={idx}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            
+            <select
+              value={rel.relationType}
+              onChange={(e) => updateRelationship(rel.id, 'relationType', e.target.value)}
+              className="select-styled"
+            >
+              <option value="1:1">One-to-One</option>
+              <option value="1:M">One-to-Many</option>
+              <option value="M:1">Many-to-One</option>
+              <option value="M:N">Many-to-Many</option>
+            </select>
+            
+            <button
+              onClick={() => removeRelationship(rel.id)}
+              className="clear-button"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
+</div>
+)}
 
             <div className="actions">
               <button
@@ -444,23 +501,24 @@ const FileUpload = () => {
             </div>
 
             {Array.isArray(results) && results.length > 1 && serverRelationships && (
-              <div className="card nested-card">
-                <h4>Defined Relationships</h4>
-                {(() => {
-                  const rels = serverRelationships;
-                  const primaryName = rels.primaryFilename || (results[rels.primaryIndex]?.filename || results[rels.primaryIndex]?.table_name);
-                  const entries = rels.relations ? Object.entries(rels.relations) : [];
-                  if (entries.length === 0) return <p>No relationships specified.</p>;
-                  return (
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                      {entries.map(([fname, relType]) => (
-                        <li key={fname}><b>{primaryName}</b> ↔ <b>{fname}</b>: {relType}</li>
-                      ))}
-                    </ul>
-                  );
-                })()}
-              </div>
-            )}
+  <div className="card nested-card">
+    <h4>Defined Relationships</h4>
+    {(() => {
+      if (!serverRelationships.relationships || serverRelationships.relationships.length === 0) {
+        return <p>No relationships specified.</p>;
+      }
+      return (
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {serverRelationships.relationships.map((rel, index) => (
+            <li key={index}>
+              <b>{rel.table1}</b> ↔ <b>{rel.table2}</b>: {rel.relationType}
+            </li>
+          ))}
+        </ul>
+      );
+    })()}
+  </div>
+)}
 
             <div className="actions" style={{ marginBottom: 16 }}>
               <button className="buttonSecondary" disabled={analyzingAll} onClick={handleAnalyzeAll}>

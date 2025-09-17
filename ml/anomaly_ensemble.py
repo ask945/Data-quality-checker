@@ -36,7 +36,7 @@ def run_all_anomaly_detectors(df: pd.DataFrame, contamination: float = 0.05, mod
             results['lightgbm'] = lightgbm_results
             results['lightgbm_predictions'] = predictions
             results['feature_importance'] = feature_importance
-            print(f"✓ LightGBM anomalies detected: {len(lightgbm_results)}")
+            print(f"✓ Complex pattern anomalies detected: {len(lightgbm_results)}")
         except Exception as e:
             print(f"✗ LightGBM anomaly detection failed: {e}")
             results['lightgbm'] = pd.DataFrame()
@@ -82,9 +82,7 @@ def combine_anomaly_results(all_results: Dict) -> pd.DataFrame:
     )
 
     filtered_scores = filter_high_confidence_anomalies(scores_df, min_confidence=0.3)
-
     ranked_scores = rank_anomalies_by_severity(filtered_scores)
-    
     return ranked_scores
 
 def generate_anomaly_report(df: pd.DataFrame, anomaly_results: pd.DataFrame, feature_importance: pd.DataFrame = None) -> Dict:

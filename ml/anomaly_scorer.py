@@ -83,6 +83,6 @@ def rank_anomalies_by_severity(scores_df: pd.DataFrame) -> pd.DataFrame:
         'data_type_violation': 0.9
     }
     
-    scores_df['method_weight'] = scores_df['method'].map(method_weights).fillna(0.5)
+    scores_df['method_weight'] = scores_df['issue_type'].map(method_weights).fillna(0.5)
     scores_df['severity_score'] = scores_df['confidence'] * scores_df['method_weight']
     return scores_df.sort_values('severity_score', ascending=False) 

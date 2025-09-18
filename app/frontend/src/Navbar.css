@@ -1,0 +1,45 @@
+.navbar {
+  display: flex;
+  justify-content: center; /* Change this to center the items */
+  align-items: center;
+  background-color: var(--color-surface-elevated, #fff); /* Use CSS variable for theme compatibility */
+  padding: 0.5rem 2rem;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+}
+
+.navbar-brand {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #2d3748;
+  text-decoration: none;
+}
+
+.navbar-nav {
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 1.5rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: #4a5568;
+  font-size: 1rem;
+  padding: 0.5rem 0;
+  /* The line below was removed to prevent a layout shift */
+  /* border-bottom: 2px solid transparent; */
+  transition: color 0.2s ease-in-out; /* Removed border-color from transition */
+}
+
+.nav-link:hover {
+  color: #2b6cb0;
+}
+
+/* Style for the active link */
+.nav-link.active {
+  color: #2b6cb0;
+  font-weight: 600;
+  /* The line below that created the "underline" has been removed */
+  /* border-bottom-color: #2b6cb0; */
+}

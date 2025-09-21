@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
-
+const API_URL = "https://data-quality-checker.onrender.com";
 const FileUpload = () => {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -102,7 +102,7 @@ const updateRelationship = (id, field, value) => {
         formData.append("file", files[0]);
         
         const res = await axios.post(
-          `http://localhost:8000/upload?analysis_type=${analyzeType}`, 
+          `${API_URL}/upload?analysis_type=${analyzeType}`, 
           formData, 
           {
             headers: { "Content-Type": "multipart/form-data" },
@@ -128,7 +128,7 @@ const updateRelationship = (id, field, value) => {
         } catch (_) {}
         
         const res = await axios.post(
-          `http://localhost:8000/upload-multiple?analysis_type=${analyzeType}`, 
+          `${API_URL}/upload-multiple?analysis_type=${analyzeType}`, 
           formData, 
           {
             headers: { "Content-Type": "multipart/form-data" },
@@ -159,7 +159,7 @@ const updateRelationship = (id, field, value) => {
   const handleAnalyze = async (tableName, index) => {
     setAnalyzing(prev => ({ ...prev, [index]: true }));
     try {
-      const res = await axios.get(`http://localhost:8000/analyze/${tableName}?analysis_type=${analyzeType}`);
+      const res = await axios.get(`${API_URL}/analyze/${tableName}?analysis_type=${analyzeType}`);
       setAnalysis(prev => ({ ...prev, [index]: res.data }));
     } catch (err) {
       setAnalysis(prev => ({ ...prev, [index]: { error: err.response?.data?.detail || "Analysis failed" } }));
@@ -179,7 +179,7 @@ const updateRelationship = (id, field, value) => {
       for (let i = 0; i < results.length; i++) {
         const tableName = results[i].table_name;
         try {
-          const res = await axios.get(`http://localhost:8000/analyze/${tableName}?analysis_type=${analyzeType}`);
+          const res = await axios.get(`${API_URL}/analyze/${tableName}?analysis_type=${analyzeType}`);
           setAnalysis(prev => ({ ...prev, [i]: res.data }));
         } catch (err) {
           setAnalysis(prev => ({ ...prev, [i]: { error: err.response?.data?.detail || "Analysis failed" } }));
@@ -191,7 +191,7 @@ const updateRelationship = (id, field, value) => {
           files: results.map(r => ({ filename: r.filename, table_name: r.table_name }))
         };
         try {
-          const res = await axios.post(`http://localhost:8000/analyze-relationships`, payload);
+          const res = await axios.post(`${API_URL}/analyze-relationships`, payload);
           setCrossResults(res.data);
         } catch (err) {
           setError(err.response?.data?.detail || "Cross-table analysis failed");

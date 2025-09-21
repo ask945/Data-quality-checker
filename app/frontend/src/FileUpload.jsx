@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
-const API_URL = "https://data-quality-checker.onrender.com";
+const API_URL = "https://data-quality-checker-srln.onrender.com";
 const FileUpload = () => {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
